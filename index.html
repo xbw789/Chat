@@ -14,6 +14,7 @@ body { font-family: -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; b
 .login p { color:#999; font-size:13px; margin-bottom:24px; }
 .login input { width:100%; max-width:300px; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:12px; font-size:16px; }
 .login button { width:100%; max-width:300px; padding:12px; background:#07c160; color:#fff; border:none; border-radius:8px; font-size:16px; cursor:pointer; }
+.login .tip { margin-top:12px; font-size:12px; color:#bbb; text-align:center; }
 
 /* 主人界面 */
 .admin-layout { display:flex; height:100vh; }
@@ -27,7 +28,8 @@ body { font-family: -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; b
 
 /* 聊天区 */
 .chat-area { flex:1; display:flex; flex-direction:column; }
-.header { background:#07c160; color:#fff; padding:12px; text-align:center; font-size:15px; }
+.header { background:#07c160; color:#fff; padding:12px; text-align:center; font-size:15px; display:flex; align-items:center; justify-content:center; gap:8px; }
+.header .logout-btn { font-size:12px; background:rgba(255,255,255,0.3); border:none; color:#fff; padding:4px 10px; border-radius:12px; cursor:pointer; }
 #log { flex:1; overflow-y:auto; padding:12px; background:#fafafa; }
 .msg { max-width:75%; margin:8px 0; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.5; word-break:break-word; }
 .me { background:#95ec69; margin-left:auto; }
@@ -54,6 +56,7 @@ body { font-family: -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; b
   <p id="loginSub">私聊客服 · 支持文字/图片/语音</p>
   <input id="nicknameInput" placeholder="输入昵称（可选）">
   <button onclick="enterChat()">进入</button>
+  <p class="tip">同一设备再次打开会自动恢复身份</p>
 </div>
 
 <!-- 主人界面 -->
@@ -77,7 +80,10 @@ body { font-family: -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; b
 
 <!-- 访客界面 -->
 <div class="visitor-layout" id="visitorPage" style="display:none;">
-  <div class="header" id="visitorHeader">💬 私聊中</div>
+  <div class="header" id="visitorHeader">
+    <span id="headerName">💬 私聊中</span>
+    <button class="logout-btn" onclick="logout()">退出</button>
+  </div>
   <div id="visitorLog" style="flex:1;overflow-y:auto;padding:12px;"></div>
   <div class="input-bar">
     <button class="icon-btn" onclick="document.getElementById('imgInputVisitor').click()" title="发图片">🖼️</button>
@@ -120,21 +126,43 @@ if (isOwner) {
   document.getElementById('adminPage').style.display = 'flex'
   loadVisitorList()
 } else {
-  document.getElementById('loginTitle').innerText = '💬 私聊客服'
+  // 访客：检查是否有保存的身份
+  const savedId = localStorage.getItem('visitorId')
+  const savedName = localStorage.getItem('nickname')
+  if (savedId && savedName) {
+    // 自动恢复
+    visitorId = savedId
+    nickname = savedName
+    document.getElementById('loginPage').style.display = 'none'
+    document.getElementById('visitorPage').style.display = 'flex'
+    document.getElementById('headerName').innerText = '💬 私聊中（' + nickname + '）'
+    db.ref(`rooms/${roomId}/${visitorId}/messages`).on('child_added', snap => appendMsg('visitor', snap.val()))
+  }
+  // 否则显示登录页，等用户点"进入"
 }
 
 function enterChat() {
   nickname = document.getElementById('nicknameInput').value.trim() || ('访客' + Math.random().toString(36).slice(2,5))
   visitorId = 'v_' + Math.random().toString(36).slice(2,8)
   
+  // 保存身份到本地
+  localStorage.setItem('visitorId', visitorId)
+  localStorage.setItem('nickname', nickname)
+  
   document.getElementById('loginPage').style.display = 'none'
   document.getElementById('visitorPage').style.display = 'flex'
-  document.getElementById('visitorHeader').innerText = '💬 私聊中（' + nickname + '）'
+  document.getElementById('headerName').innerText = '💬 私聊中（' + nickname + '）'
   
   db.ref(`rooms/${roomId}/${visitorId}/info`).set({ nickname, joinedAt: Date.now() })
-  
   db.ref(`rooms/${roomId}/${visitorId}/messages`).on('child_added', snap => appendMsg('visitor', snap.val()))
   db.ref(`rooms/${roomId}/${visitorId}/info`).update({ hasNew: true })
+}
+
+// 退出登录（清身份，重新来）
+function logout() {
+  localStorage.removeItem('visitorId')
+  localStorage.removeItem('nickname')
+  location.reload()
 }
 
 // ===== 主人：加载访客列表 =====
@@ -209,7 +237,6 @@ function sendImage(role) {
   const file = document.getElementById(inputId).files[0]
   if (!file) return
   
-  // 限制大小 500KB，避免 Firebase 单条数据超限
   if (file.size > 500 * 1024) {
     alert('图片太大，请压缩到 500KB 以内')
     return
@@ -255,7 +282,6 @@ async function toggleRecord(role) {
         notifyNew(vid)
       }
       reader.readAsDataURL(blob)
-      // 关闭麦克风
       stream.getTracks().forEach(t => t.stop())
     }
     
